@@ -288,14 +288,18 @@ final class WebServer: @unchecked Sendable {
             if path == "/" { return endpoints["/index.html"] }
             // 前缀路由：/live/fr-12.m4s 这种动态名字交给注册了 /live 的处理器，
             // 由它自己做白名单校验 —— 绝不把未校验的路径直接拼成文件路径。
-            // 取最长匹配，避免以后加了 /live/status 之类更具体的注册被 /live 抢走。
-            let candidates = endpoints.filter { _, key in
-                key.hasPrefix("/") && path.hasPrefix(key + "/")
-            }.map { (key: $0.key, value: $0.value) }
-            let best = candidates
-                .filter { $0.value.isPrefix }
-                .max { $0.key.count < $1.key.count }
-            return best?.value
+            // 取最长匹配，避免以后加 /live/status 之类更具体的注册被 /live 抢走。
+            // 这里刻意用显式循环：链式 filter/map 配元组解构在不同编译器上推断结果不一致。
+            var bestKeyLength = -1
+            var best: Endpoint?
+            for (key, endpoint) in endpoints where endpoint.isPrefix {
+                guard path.hasPrefix(key + "/") else { continue }
+                if key.count > bestKeyLength {
+                    bestKeyLength = key.count
+                    best = endpoint
+                }
+            }
+            return best
         }
     }
 

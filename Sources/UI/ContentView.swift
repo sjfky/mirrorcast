@@ -64,7 +64,7 @@ private struct MirrorPanel: View {
             if let url = cast.receiverURL {
                 Text(url)
                     .font(.system(.title3, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(Color.lime)
+                    .foregroundStyle(Theme.accent)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -164,7 +164,7 @@ private struct LiveMirrorBlock: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            .tint(Color.lime)
+            .tint(Theme.accent)
             .onChange(of: cast.liveMirrorEnabled) { _ in cast.applyLiveMirrorFlag() }
 
             if let url = cast.livePlaylistURL {
@@ -253,7 +253,7 @@ private struct DLANAPanel: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.lime)
+                .tint(Theme.accent)
                 .foregroundStyle(.black)
                 .disabled(cast.selected == nil || cast.isPushing || urlText.isEmpty)
             }
@@ -272,7 +272,7 @@ private struct RendererRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isSelected ? Color.lime : Color.secondary)
+                .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(renderer.name).font(.body.weight(.medium))
                 Text(renderer.modelInfo ?? renderer.hostLabel)
@@ -349,6 +349,11 @@ private struct TransportPanel: View {
 }
 
 // MARK: - 通用
+
+enum Theme {
+    /// SwiftUI 没有 Color.lime（那是 UIColor/旧调色板的名字），自己定一个荧光绿
+    static let accent = Color(red: 0.78, green: 0.95, blue: 0.30)
+}
 
 private struct Panel<Content: View>: View {
     let title: String
