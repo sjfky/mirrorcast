@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MirrorCast 接收端</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; background: #000;
+    font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+  }
+  #frame {
+    max-width: 100%; max-height: 100%;
+    object-fit: contain;
+    /* 车机 WebView 默认会给 img 加淡入动画，看起来像延迟，关掉 */
+    transition: none;
+    -webkit-transform: translateZ(0);
+  }
+  #hud {
+    position: fixed; left: 12px; top: 10px; z-index: 5;
+    display: flex; gap: 10px; align-items: center;
+    font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #9aa4b2; text-shadow: 0 1px 2px #000;
+    opacity: .35; transition: opacity .25s;
+  }
+  #hud:hover, #hud.show { opacity: 1; }
+  #dot { width: 7px; height: 7px; border-radius: 50%; background: #e0524d; }
+  #dot.live { background: #7be188; }
+  button {
+    font: inherit; color: #cfd8e3; background: rgba(255,255,255,.08);
+    border: 1px solid rgba(255,255,255,.16); border-radius: 6px;
+    padding: 4px 9px; cursor: pointer;
+  }
+  #hint {
+    position: fixed; inset: 0; z-index: 4;
+    display: flex; flex-direction: column; gap: 8px;
+    align-items: center; justify-content: center;
+    color: #6f7d8f; font-size: 14px; text-align: center; padding: 24px;
+  }
+  #hint b { color: #7be188; font-weight: 600; }
+  #hint.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <img id="frame" alt="" decoding="async">
+</div>
+
+<div id="hint">
+  <div>正在连接手机…</div>
+  <div>手机上点 <b>开始系统录屏</b> 之后，这里就会出画面</div>
+</div>
+
+<div id="hud">
+  <span id="dot"></span>
+  <span id="fps">-- fps</span>
+  <span id="age">-- s</span>
+  <button id="fs">全屏</button>
+  <button id="fit">适应/填充</button>
+</div>
+
+<script>
+/*
+  这条链路刻意用 multipart/x-mixed-replace 而不是 MSE/h264：
+  车机自带浏览器的 MediaSource 实现普遍残缺（很多 Android 4.4 内核的 WebView
+  连 <video> + fMP4 都解不了），但 img + multipart 是 1996 年的老古董，
+  没有任何一个浏览器不支持。实时镜像优先保证"能出画面"。
+*/
+(function () {
+  'use strict';
+
+  var img   = document.getElementById('frame');
+  var dot   = document.getElementById('dot');
+  var fpsEl = document.getElementById('fps');
+  var ageEl = document.getElementById('age');
+  var hint  = document.getElementById('hint');
+  var hud   = document.getElementById('hud');
+
+  var frames = 0, fpsWindow = 0, lastFrameAt = 0, reconnectTimer = 0;
+  var fill = false;
+
+  function src() {
+    // 带时间戳避免车机 WebView 把 /mjpeg 当成可缓存资源
+    return '/mjpeg?_=' + Date.now();
+  }
+
+  function start() {
+    clearTimeout(reconnectTimer);
+    img.src = src();
+  }
+
+  img.addEventListener('load', function () {
+    frames++;
+    fpsWindow++;
+    lastFrameAt = Date.now();
+    dot.classList.add('live');
+    hint.classList.add('hidden');
+    // multipart 里每帧 load 都要重新挂 src？不用 —— 浏览器会自己持续解 part。
+    // 这里只用于统计和"第一帧到了"判定。
+  });
+
+  img.addEventListener('error', function () {
+    dot.classList.remove('live');
+    // 手机端服务还在但连接被断（切后台、锁屏、iOS 回收 socket）：
+    // 2 秒后重连，别写激进重试把车机 CPU 顶满
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(start, 2000);
+  });
+
+  // /status 只用来显示"手机那边到底还在不在产帧"，
+  // 画面卡住时能一眼区分是手机没采到、还是网络断了
+  function pollStatus() {
+    fetch('/status?_=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.streaming) { dot.classList.remove('live'); }
+      })
+      .catch(function () {});
+  }
+  setInterval(pollStatus, 3000);
+
+  setInterval(function () {
+    fpsEl.textContent = fpsWindow + ' fps';
+    fpsWindow = 0;
+    ageEl.textContent = lastFrameAt ? ((Date.now() - lastFrameAt) / 1000).toFixed(1) + 's' : '-- s';
+    // 3 秒没有新帧，多半是广播停了，重新挂一次连接
+    if (lastFrameAt && Date.now() - lastFrameAt > 3000) start();
+    if (!lastFrameAt && frames === 0) hint.classList.remove('hidden');
+  }, 1000);
+
+  document.getElementById('fs').addEventListener('click', function () {
+    var el = document.documentElement;
+    if (el.requestFullscreen) { el.requestFullscreen().catch(function(){}); }
+    else if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); }
+    hud.classList.remove('show');
+  });
+
+  document.getElementById('fit').addEventListener('click', function () {
+    fill = !fill;
+    img.style.objectFit = fill ? 'cover' : 'contain';
+    img.style.width = fill ? '100%' : '';
+    img.style.height = fill ? '100%' : '';
+  });
+
+  // 车机屏幕往往没有鼠标，点一下让 HUD 显形
+  document.body.addEventListener('click', function () {
+    hud.classList.toggle('show');
+  });
+
+  window.addEventListener('unload', function () { img.src = ''; });
+
+  start();
+})();
+</script>
+</body>
+</html>

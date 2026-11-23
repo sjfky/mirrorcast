@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>MirrorCast</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<!-- 本地网络权限：SSDP 组播收发 + 监听入向 TCP 都要它。
+	     不给这段话，第一次访问局域网时系统直接被拒，表现为"搜不到任何设备"。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MirrorCast 需要在你的局域网里寻找 DLNA 播放设备，并让车机/电视浏览器访问本机画面流。</string>
+
+	<!-- 只声明实际会用到的浏览服务。SSDP 走的是 UDP 1900，不经过 Bonjour，
+	     这里列 _upnp 是为了让部分固件的白名单放行，不参与发现逻辑。 -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_upnp._tcp</string>
+		<string>_upnp._udp</string>
+	</array>
+
+	<!-- DLNA 设备一律是 http://，不开这个 ATS 会把控制请求全部拦掉 -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+
+	<key>UIBackgroundModes</key>
+	<array>
+		<!-- 声明 audio 是唯一能让 App 进程带着 HTTP 服务在后台活下来的常见做法。
+		     代价：本 App 其实不放音频，这条在 App Store 审核会被拒；
+		     自己侧载装则无所谓。要上商店就删掉这个 key，改成"必须保持前台"。 -->
+		<string>audio</string>
+	</array>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+</dict>
+</plist>

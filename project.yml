@@ -1,0 +1,95 @@
+# XcodeGen 配置：`brew install xcodegen` 后执行 `xcodegen generate`
+# 为什么不用手写 .xcodeproj：手写 pbxproj 的校验和/UUID 极易出错，
+# 生成器能保证两个 target 的引用关系（尤其是扩展的 Embed）是干净的。
+
+name: MirrorCast
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.35.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    CODE_SIGN_STYLE: Automatic
+    # 改成你自己的 Team ID，否则真机装不上（xcodegen 之后也可在 Xcode 里选）
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: "NO"
+    # 本地网络调试期关掉一些烦人的检查
+    ONLY_ACTIVE_ARCH: "YES"
+
+targets:
+
+  MirrorCast:
+    type: application
+    platform: iOS
+    sources:
+      # Support / Discovery / UPnP / Cast / Net / UI 全在 App target
+      - path: Sources/Support
+      - path: Sources/Discovery
+      - path: Sources/UPnP
+      - path: Sources/Cast
+      - path: Sources/Net
+      - path: Sources/UI
+      # Capture 里只有 AppGroupBridge / FrameEncoder 是两边共用的
+      - path: Sources/Capture/AppGroupBridge.swift
+      - path: Sources/Capture/FrameEncoder.swift
+      - path: Sources/Capture/ExtensionFramePoller.swift
+      - path: Sources/Capture/ScreenCapturer.swift
+      # HLS 窗口/播放列表生成（Sources/Net 已整目录包含 LiveStreamRoutes，别重复列）
+      - path: Sources/Muxer/HLSWindow.swift
+      # App 内采集的实时预览需要 UI 目录之外的东西？不需要 —— 预览直接读 FrameBus
+      - path: Resources/web/index.html
+        buildPhase: resources
+    dependencies:
+      # app-extension 必须 embed，否则装到手机上系统找不到广播扩展，
+      # 「开始广播」列表里就是空的
+      - target: MirrorCastBroadcast
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mirrorcast
+        PRODUCT_NAME: MirrorCast
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: MirrorCast.entitlements
+
+  MirrorCastBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      # 广播扩展只带这条链路用得上的代码：采集入口 + JPEG 编码 + fMP4 拆包 +
+      # HLS 落盘 + writer。千万别塞 Sources/* 整目录 —— SSDP/SOAP/UI 在扩展进程里
+      # 毫无意义，还会顶到扩展的内存上限（约 120MB）。
+      - path: Sources/Broadcast/SampleHandler.swift
+      - path: Sources/Capture/AppGroupBridge.swift
+      - path: Sources/Capture/FrameEncoder.swift
+      - path: Sources/Capture/HLSSegmentWriter.swift
+      - path: Sources/Muxer/FragmentedMP4Splitter.swift
+      - path: Sources/Muxer/HLSWindow.swift
+      - path: Sources/Muxer/HLSLivePump.swift
+      # FrameEncoder / HLSLivePump 依赖这两个小助手，漏了会链接期报未定义符号
+      - path: Sources/Support/Locking.swift
+      - path: Sources/Support/Log.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mirrorcast.broadcast
+        PRODUCT_NAME: MirrorCastBroadcast
+        PRODUCT_MODULE_NAME: MirrorCastBroadcast
+        INFOPLIST_FILE: Broadcast/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: MirrorCastBroadcast.entitlements
+
+schemes:
+  MirrorCast:
+    build:
+      targets:
+        MirrorCast: all
+    run:
+      config: Debug
+      # 真机上跑：Xcode → MirrorCast target → Signing & Capabilities 里选 Team
