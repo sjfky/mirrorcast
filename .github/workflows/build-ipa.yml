@@ -1,0 +1,96 @@
+name: 云端构建 MirrorCast.ipa（无需本机 Mac）
+
+# 触发方式二选一：
+#   1) 推送到 main 自动跑
+#   2) Actions 页面手动 Run workflow（可填 team_id 选择是否签名）
+on:
+  workflow_dispatch:
+    inputs:
+      team_id:
+        description: 'Apple 开发者 Team ID（留空 = 出未签名包，交给 Sideloadly/AltStore 用你的免费 Apple ID 签）'
+        required: false
+        default: ''
+      configuration:
+        description: '构建配置'
+        type: choice
+        options: [Debug, Release]
+        default: Release
+  push:
+    branches: [main]
+
+# 只用公开的 Xcode 版本，避免 runner 镜像里没装对应版
+env:
+  XCODE_VERSION: '16.4'
+  SCHEME: MirrorCast
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 选择 Xcode
+        run: |
+          set -euo pipefail
+          WANT="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [ -d "$WANT" ]; then
+            sudo xcode-select -s "$WANT/Contents/Developer"
+          else
+            # runner 镜像升版后具体小版本会变，找不到就用系统默认的那个，
+            # 别让整个构建因为路径而对不上
+            echo "!! 镜像里没有 Xcode ${XCODE_VERSION}，用默认版本"
+            ls -d /Applications/Xcode_*.app || true
+          fi
+          xcodebuild -version
+          swift --version
+
+      - name: 安装 xcodegen
+        run: brew install xcodegen
+
+      - name: 生成工程
+        run: xcodegen generate
+
+      # 真机 SDK、不跑代码检测；签名分两种模式
+      - name: 构建
+        run: |
+          set -euo pipefail
+          DERIVED="$(pwd)/build/DerivedData"
+          if [ -n "${{ inputs.team_id }}" ]; then
+            echo "› 用 Team ${{ inputs.team_id }} 签名（需要该账号设备已注册 UDID）"
+            xcodebuild -project MirrorCast.xcodeproj -scheme "$SCHEME" \
+              -configuration "${{ inputs.configuration }}" \
+              -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath "$DERIVED" \
+              DEVELOPMENT_TEAM="${{ inputs.team_id }}" \
+              CODE_SIGN_STYLE=Automatic \
+              build
+          else
+            echo "› 出未签名包（云端没有你的 Apple 账号，签名必须在你自己的电脑上完成）"
+            xcodebuild -project MirrorCast.xcodeproj -scheme "$SCHEME" \
+              -configuration "${{ inputs.configuration }}" \
+              -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath "$DERIVED" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              build
+          fi
+
+      - name: 打成 Payload/ipa
+        run: ./scripts/package_ipa.sh "${{ inputs.configuration }}"
+
+      - name: 检查包结构
+        run: |
+          set -euo pipefail
+          test -f build/MirrorCast.ipa
+          unzip -l build/MirrorCast.ipa | sed -n '1,12p'
+          # 录屏扩展必须在 PlugIns 里，否则手机装上了也选不到广播
+          unzip -l build/MirrorCast.ipa | grep -q 'PlugIns/.*appex' \
+            || { echo "!! 包里没有广播扩展，整机镜像会失效"; exit 1; }
+          echo "✔ ipa 结构正常"
+
+      # 顺手把没压缩的 .app 也传一份，某些签名工具吃这个更方便
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MirrorCast-unsigned-${{ github.sha }}
+          path: build/MirrorCast.ipa
+          if-no-files-found: error
+          retention-days: 14
