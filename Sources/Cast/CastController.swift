@@ -245,7 +245,12 @@ final class CastController: ObservableObject {
     /// 把手机的实时画面当直播流推给所选 DMR
     func pushLiveMirror() {
         guard selected != nil else { lastError = "先选一台支持 DLNA 的设备"; return }
-        guard liveMirrorEnabled else { AppGroupBridge.liveEnabled = true; liveMirrorEnabled = true }
+        if !liveMirrorEnabled {
+            // 用户点"推直播"就等于要开它；但扩展只在 broadcastStarted 读这个标志，
+            // 所以下面仍会提示"需重开广播"（见 liveSegments==0 的分支）
+            liveMirrorEnabled = true
+            AppGroupBridge.liveEnabled = true
+        }
         guard serverPort > 0, let ip = Self.localIPv4String() else {
             lastError = "内置服务没起来，推不了直播"
             return
