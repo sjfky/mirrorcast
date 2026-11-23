@@ -282,7 +282,8 @@ final class WebServer: @unchecked Sendable {
     }
 
     private func lookup(_ path: String) -> Endpoint? {
-        stateQueue.sync {
+        // 闭包必须显式写 -> Endpoint?，否则会被首个 return 推成非可选
+        stateQueue.sync { () -> Endpoint? in
             if let direct = endpoints[path] { return direct }
             if path == "/" { return endpoints["/index.html"] }
             // 前缀路由：/live/fr-12.m4s 这种动态名字交给注册了 /live 的处理器，
@@ -307,8 +308,7 @@ final class WebServer: @unchecked Sendable {
                 return Self.parseRequest(String(decoding: headData, as: UTF8.self))
             }
             do {
-                let (chunk, _, _) = try await conn.receive(minimumIncompleteLength: 1, maximumLength: 8192)
-                if chunk.isEmpty { break }
+                guard let chunk = try await receiveSome(conn) else { break }
                 buffer.append(chunk)
                 if buffer.count > 128_000 { break }
             } catch {
@@ -316,6 +316,18 @@ final class WebServer: @unchecked Sendable {
             }
         }
         return Self.parseRequest(String(decoding: buffer, as: UTF8.self))
+    }
+
+    /// NWConnection 的 async 版 receive 在某些 SDK 上不可用（只能拿到 completion 版），
+    /// 这里包一层，签名固定，别依赖工具链差异
+    private func receiveSome(_ conn: NWConnection) async throws -> Data? {
+        try await withCheckedThrowingContinuation { cont in
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, _, error in
+                if let error { cont.resume(throwing: error); return }
+                guard let data, !data.isEmpty else { cont.resume(returning: nil); return }
+                cont.resume(returning: data)
+            }
+        }
     }
 
     static func parseRequest(_ head: String) -> HTTPRequest? {

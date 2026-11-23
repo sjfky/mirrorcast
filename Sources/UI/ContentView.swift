@@ -64,7 +64,7 @@ private struct MirrorPanel: View {
             if let url = cast.receiverURL {
                 Text(url)
                     .font(.system(.title3, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(.lime)
+                    .foregroundStyle(Color.lime)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -140,11 +140,11 @@ private struct LiveFrameView: View {
             }
         }
         .onReceive(timer) { _ in
-            guard let jpeg = cast.frames.current?.jpeg else { return }
+            guard let frame = cast.frames.current else { return }
             // 帧号没变就不重建 UIImage
-            if cast.frames.current?.seq == lastSeq { return }
-            lastSeq = cast.frames.current?.seq
-            image = UIImage(data: jpeg)
+            if frame.seq == lastSeq { return }
+            lastSeq = frame.seq
+            image = UIImage(data: frame.jpeg)
         }
     }
 
@@ -164,7 +164,7 @@ private struct LiveMirrorBlock: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            .tint(.lime)
+            .tint(Color.lime)
             .onChange(of: cast.liveMirrorEnabled) { _ in cast.applyLiveMirrorFlag() }
 
             if let url = cast.livePlaylistURL {
@@ -253,7 +253,7 @@ private struct DLANAPanel: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.lime)
+                .tint(Color.lime)
                 .foregroundStyle(.black)
                 .disabled(cast.selected == nil || cast.isPushing || urlText.isEmpty)
             }
@@ -272,7 +272,7 @@ private struct RendererRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(isSelected ? .lime : .secondary)
+                .foregroundStyle(isSelected ? Color.lime : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(renderer.name).font(.body.weight(.medium))
                 Text(renderer.modelInfo ?? renderer.hostLabel)

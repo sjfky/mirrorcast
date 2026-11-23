@@ -20,16 +20,25 @@ actor ExtensionFramePoller {
         task = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                // 先只看属性，变了才读内容 —— 不然每 45ms 白读一张几百 KB 的图
-                if let snap = AppGroupBridge.snapshot(), snap != self.last {
-                    self.last = snap
-                    if let jpeg = AppGroupBridge.readFrame(), jpeg.count > 1_000 {
-                        self.bus.publish(jpeg)
-                    }
-                }
-                try? await Task.sleep(nanoseconds: UInt64(self.interval * 1_000_000_000))
+                // 网络/磁盘这一小段刻意关在 actor 方法里：
+                // 直接在 Task 闭包里改 actor 属性，Swift 6 会判成"非隔离上下文访问"，
+                // 而且真并发下 last 会被写坏
+                let step = await self.tick()
+                try? await Task.sleep(nanoseconds: UInt64(max(0.01, step) * 1_000_000_000))
             }
         }
+    }
+
+    /// 返回下一轮要等多久
+    private func tick() -> TimeInterval {
+        // 先只看属性，变了才读内容 —— 不然每 45ms 白读一张几百 KB 的图
+        if let snap = AppGroupBridge.snapshot(), snap != last {
+            last = snap
+            if let jpeg = AppGroupBridge.readFrame(), jpeg.count > 1_000 {
+                bus.publish(jpeg)
+            }
+        }
+        return interval
     }
 
     func stop() {

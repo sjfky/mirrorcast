@@ -84,7 +84,7 @@ final class CastController: ObservableObject {
         statusTask?.cancel()
         frameCountTask?.cancel()
         inAppCapture.stop()
-        extPoller.stop()
+        Task { await extPoller.stop() }   // actor 隔离方法，同步上下文里必须包一层 Task
         server.stop()
     }
 
