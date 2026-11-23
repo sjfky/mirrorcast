@@ -81,7 +81,7 @@ final class SampleHandler: RPBroadcastSampleHandler {
                 AppGroupBridge.writeFrame(jpeg)
             }
 
-        case .audio, .audioApp:
+        case .audioApp, .audioMic:
             hls?.append(sampleBuffer, isVideo: false)
 
         @unknown default:

@@ -39,8 +39,10 @@ final class HLSSegmentWriter: @unchecked Sendable {
     private var segmentStarted = false
     private var cutting = false
     private var segmentFileIndex = 0
-    /// 已发布的全部分片时长，作为下一段的 movieTimeOffset，保证 tfdt 连续
+    /// 已发布的全部分片总时长。下一段的会话起点要往前挪这么多，tfdt 才接得上
     private var accumulated = CMTime.zero
+    /// 本段的第一个采样时间（算时长用；和上面的 sessionStart 不是一回事）
+    private var segmentOrigin = CMTime.invalid
     private var lastPTS = CMTime.zero
     private var buffered: [(sb: CMSampleBuffer, isVideo: Bool)] = []
     private let window: HLSWindow
@@ -99,7 +101,7 @@ final class HLSSegmentWriter: @unchecked Sendable {
 
     private func handle(_ sampleBuffer: CMSampleBuffer, isVideo: Bool) {
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard CMTimeIsValid(pts) else { return }
+        guard pts.isValid else { return }
         lastPTS = pts
 
         // 会话还没起来（在等第一个视频帧定宽高/起点），或者正在换段 → 先进缓冲
@@ -112,7 +114,10 @@ final class HLSSegmentWriter: @unchecked Sendable {
         enqueue(sampleBuffer, isVideo: isVideo)
         drainWhileReady()
 
-        if isVideo, CMTimeGetSeconds(CMTimeSubtract(pts, sessionStart)) >= config.segmentSeconds {
+        // 判"这段够长了"必须用 segmentOrigin（真实首帧时间），
+        // 不能用被 accumulated 挪过的 sessionStart —— 否则第一段就会立刻被切断
+        if isVideo, segmentOrigin.isValid,
+           CMTimeGetSeconds(CMTimeSubtract(pts, segmentOrigin)) >= config.segmentSeconds {
             initiateCut()
         }
     }
@@ -160,9 +165,13 @@ final class HLSSegmentWriter: @unchecked Sendable {
             guard w.startWriting() else {
                 throw makeError("startWriting 失败: \(w.error?.localizedDescription ?? "无详情")")
             }
-            // atSourceTime 用第一个视频帧，而不是 .zero：
-            // 广播启动时 ReplayKit 的时间戳是 mach 绝对时间，从 0 起算会得到巨大的负数
-            w.startSession(atSourceTime: start)
+            // 关键：AVAssetWriter 没有 movieTimeOffset 这种东西（iOS 上不存在该成员）。
+            // 让 tfdt 连续的可行做法是把**会话起点往前挪 accumulated**：
+            //   mediaTime = pts - sessionStart = (pts - segmentOrigin) + accumulated
+            // 于是第 N 段的 tfdt 从"前面所有段的总时长"开始，播放列表里不需要 DISCONTINUITY。
+            let shifted = CMTimeSubtract(start, accumulated)
+            w.startSession(atSourceTime: shifted)
+            segmentOrigin = start
             writer = w
             videoInput = v
             sessionStart = start
@@ -179,10 +188,6 @@ final class HLSSegmentWriter: @unchecked Sendable {
         let url = config.scratchDirectory
             .appendingPathComponent("seg-\(segmentFileIndex)-\(UUID().uuidString.prefix(8)).mp4")
         let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        if CMTimeGetSeconds(accumulated) > 0 {
-            // 媒体时间 = (pts - 会话起点) + movieTimeOffset，接上前一段的尾巴
-            w.movieTimeOffset = accumulated
-        }
         return w
     }
 
@@ -243,16 +248,16 @@ final class HLSSegmentWriter: @unchecked Sendable {
             completion()
             return
         }
-        let duration = CMTimeSubtract(lastPTS, sessionStart)
+        let duration = segmentOrigin.isValid ? CMTimeSubtract(lastPTS, segmentOrigin) : .zero
         segmentFileIndex += 1
         writer = nil
         videoInput = nil
         audioInput = nil
         segmentStarted = false
         // 必须逐个，漏一个 finish 就永远不回调（官方文档明确要求）
-        for output in w.outputs { (output as? AVAssetWriterInput)?.markAsFinished() }
+        for input in w.inputs { input.markAsFinished() }
 
-        w.finish { [weak self] in
+        w.finishWriting { [weak self] in
             guard let self else { completion(); return }
             self.queue.async {
                 if w.status == .completed {
